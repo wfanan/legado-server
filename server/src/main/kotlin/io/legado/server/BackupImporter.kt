@@ -47,7 +47,8 @@ class BackupImporter(
         val parsedShelf = readSection(zip, entries, "bookshelf.json")?.let { parseShelf(it, parsedGroups) }.orEmpty()
         val parsedBookmarks = readSection(zip, entries, "bookmark.json")?.let(::parseBookmarks).orEmpty()
         // HTTP TTS（`httpTTS.json`）：字段与备份格式逐字对齐，见 [parseHttpTts]
-        val parsedTts = readSection(zip, entries, "httpTTS.json")?.let(::parseHttpTts).orEmpty()
+        // （文件名统一传小写，与 readSection 的匹配口径一致）
+        val parsedTts = readSection(zip, entries, "httptts.json")?.let(::parseHttpTts).orEmpty()
         require(sources.isNotEmpty() || rules.isNotEmpty() || parsedShelf.isNotEmpty()) {
             "不是 Legado 备份包：未找到 bookSource.json / replaceRule.json / bookshelf.json"
         }
@@ -146,7 +147,13 @@ class BackupImporter(
     }
 
     private fun readSection(zip: ZipFile, entries: List<ZipEntry>, fileName: String): String? {
-        val entry = entries.firstOrNull { it.name.substringAfterLast('/').lowercase() == fileName } ?: return null
+        // ⚠️ 比较必须**两侧都转小写**：包内条目大小写与调用方传参不一致（真实备份是
+        // `httpTTS.json` / `bookSource.json`，而调用方习惯写小写），只把条目名转小写、
+        // 拿 `fileName` 原样比，就会静默返回 null —— 表现为「这一整段没导入」且毫无报错。
+        // 我加 httpTTS 时正是踩了这个：传 `"httpTTS.json"` ⇒ `"httptts.json" == "httpTTS.json"` 为假
+        // ⇒ TTS 一个都没导（实测库里是 []）。
+        val wanted = fileName.lowercase()
+        val entry = entries.firstOrNull { it.name.substringAfterLast('/').lowercase() == wanted } ?: return null
         require(entry.size <= MAX_ENTRY_BYTES) { "$fileName 展开后超过 ${MAX_ENTRY_BYTES / 1024 / 1024} MiB，已拒绝" }
         return zip.getInputStream(entry).use { stream -> stream.readBytes().toString(Charsets.UTF_8) }
     }
